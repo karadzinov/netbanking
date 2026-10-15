@@ -79,5 +79,12 @@ pkgbuild --root "$STAGE" \
          --no-relocate \
          dist/NetBanking-1.1.pkg 2>&1 | tail -2
 
-echo "Built $APP (self-contained) and dist/NetBanking-1.1.pkg"
+# ---- also build a drag-and-drop DMG (no installer, no admin password) ----
+DMGSTAGE=$(mktemp -d)
+ln -s /Applications "$DMGSTAGE/Applications"
+cp -R "$APP" "$DMGSTAGE/NetBanking.app"
+hdiutil create -volname "NetBanking" -srcfolder "$DMGSTAGE" -ov -quiet \
+    dist/NetBanking-1.1.dmg
+
+echo "Built $APP (self-contained) + dist/NetBanking-1.1.pkg + dist/NetBanking-1.1.dmg"
 echo "Other users still need SafeNet Authentication Client for macOS (token middleware)."
