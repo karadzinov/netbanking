@@ -36,6 +36,10 @@ install_name_tool -change /opt/homebrew/opt/openssl@4/lib/libcrypto.4.dylib \
     @loader_path/libcrypto.4.dylib "$TOOLDIR/pkcs11-tool"
 install_name_tool -id @loader_path/libopensc.13.dylib "$TOOLDIR/libopensc.13.dylib"
 install_name_tool -id @loader_path/libcrypto.4.dylib "$TOOLDIR/libcrypto.4.dylib"
+# install_name_tool invalidates embedded signatures — re-sign each modified file.
+codesign -s - --force "$TOOLDIR/libcrypto.4.dylib"
+codesign -s - --force "$TOOLDIR/libopensc.13.dylib"
+codesign -s - --force "$TOOLDIR/pkcs11-tool"
 
 # ---- build ----
 rm -rf "$APP/Contents/MacOS/NetBanking"   # fresh compile
