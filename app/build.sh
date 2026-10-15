@@ -2,10 +2,9 @@
 set -e
 cd "$(dirname "$0")"
 APP=NetBanking.app
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+TOOLDIR="$APP/Contents/MacOS/tools"
 
-# Regenerate the icon if not committed (needs only swift + sips + iconutil).
+# ---- regenerate icon if not present (needs only swift + sips + iconutil) ----
 if [ ! -f AppIcon.icns ]; then
     swift make_icon.swift icon_1024.png
     rm -rf AppIcon.iconset && mkdir -p AppIcon.iconset
@@ -17,6 +16,30 @@ if [ ! -f AppIcon.icns ]; then
     done
     iconutil -c icns AppIcon.iconset -o AppIcon.icns
 fi
+
+# ---- bundle pkcs11-tool + its libraries (Homebrew OpenSC) ----
+BREW_OPENS_C_LIB=$(brew --prefix opensc)/lib
+BREW_CRYPTO=$(brew --prefix openssl@4 2>/dev/null || brew --prefix openssl)/lib
+rm -rf "$TOOLDIR"
+mkdir -p "$TOOLDIR"
+cp /opt/homebrew/bin/pkcs11-tool "$TOOLDIR/"
+cp "$BREW_OPENS_C_LIB/libopensc.13.dylib" "$TOOLDIR/"
+cp "$BREW_CRYPTO/libcrypto.4.dylib" "$TOOLDIR/"
+# Re-point the copies at @loader_path so the bundle is self-contained.
+install_name_tool -change /opt/homebrew/opt/openssl@4/lib/libcrypto.4.dylib \
+    @loader_path/libcrypto.4.dylib "$TOOLDIR/libopensc.13.dylib"
+install_name_tool -change /opt/homebrew/Cellar/opensc/*/lib/libopensc.13.dylib \
+    @loader_path/libopensc.13.dylib "$TOOLDIR/pkcs11-tool" 2>/dev/null || true
+install_name_tool -change "$BREW_OPENS_C_LIB/libopensc.13.dylib" \
+    @loader_path/libopensc.13.dylib "$TOOLDIR/pkcs11-tool"
+install_name_tool -change /opt/homebrew/opt/openssl@4/lib/libcrypto.4.dylib \
+    @loader_path/libcrypto.4.dylib "$TOOLDIR/pkcs11-tool"
+install_name_tool -id @loader_path/libopensc.13.dylib "$TOOLDIR/libopensc.13.dylib"
+install_name_tool -id @loader_path/libcrypto.4.dylib "$TOOLDIR/libcrypto.4.dylib"
+
+# ---- build ----
+rm -rf "$APP/Contents/MacOS/NetBanking"   # fresh compile
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp AppIcon.icns "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,8 +51,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>NetBanking</string>
     <key>CFBundleDisplayName</key><string>NetBanking Helper</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>3</string>
+    <key>CFBundleShortVersionString</key><string>1.1</string>
+    <key>CFBundleVersion</key><string>4</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -38,17 +61,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 swiftc -O -o "$APP/Contents/MacOS/NetBanking" main.swift \
     -framework AppKit -framework WebKit
+swiftc -O -o "$APP/Contents/MacOS/nb-cert" nb-cert.swift
 codesign -s - --force "$APP"
 
-# Package: installs NetBanking.app into /Applications via System Preferences GUI
+# ---- package: installs NetBanking.app into /Applications ----
 STAGE=$(mktemp -d)
 cp -R "$APP" "$STAGE/NetBanking.app"
 mkdir -p "$(pwd)/dist"
 pkgbuild --root "$STAGE" \
          --install-location /Applications \
          --identifier local.netbanking.sparkasse-helper \
-         --version 1.0 \
+         --version 1.1 \
          --no-relocate \
-         dist/NetBanking-1.0.pkg 2>&1 | tail -2
-echo "Built $(pwd)/$APP and $(pwd)/dist/NetBanking-1.0.pkg"
-echo "Note: the app expects the CLI helper repo at ~/netbanking-helper (venv + netbank_login.py)."
+         dist/NetBanking-1.1.pkg 2>&1 | tail -2
+
+echo "Built $APP (self-contained) and dist/NetBanking-1.1.pkg"
+echo "Other users still need SafeNet Authentication Client for macOS (token middleware)."

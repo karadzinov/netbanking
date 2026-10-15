@@ -31,20 +31,32 @@ LOGIN_POST_URL = "https://www.netbanking.mk/Stopanstvo/Account/LoginSmartCard"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15")
 
-PKCS11_MODULE = "/usr/local/lib/libeTPkcs11.dylib"
-PKCS11_TOOL = "pkcs11-tool"
+PKCS11_TOOL = os.environ.get("NB_PKCS11_TOOL", "pkcs11-tool")
+# Candidate token middlewares, probed in order (first one that sees a token wins).
+PKCS11_MODULE_CANDIDATES = [
+    os.environ.get("NB_PKCS11_MODULE"),
+    "/usr/local/lib/libeTPkcs11.dylib",           # SafeNet Authentication Client
+    "/usr/local/lib/libIDPrimePKCS11.dylib",      # Gemalto IDPrime
+    "/usr/local/lib/libClassicClientPKCS11.dylib",# Gemalto Classic Client
+]
 # The signer's leaf certificate is identified by having a personal serialNumber=
 # attribute and no CA/qualified-issuer markers. Override via NB_CERT_SUBJECT
 # (comma-separated, UTF-8) if your CA issues differently, e.g. "SURNAME,ISSUER-CA".
 CERT_SUBJECT_MATCH = os.environ.get(
-    "NB_CERT_SUBJECT", "serialNumber=,NTRMK-").encode()
+    "NB_CERT_SUBJECT", "serialNumber=,CA")
 
 
 def _is_leaf(cert_der: bytes) -> bool:
-    keys = CERT_SUBJECT_MATCH.split(b",")
-    first = keys[0] in cert_der if keys[0] else b"serialNumber=" in cert_der
-    others = all(k not in cert_der for k in keys[1:])
-    return first and others
+    """Leaf selection on openssl's SUBJECT TEXT (the literal strings 'serialNumber='
+    etc. don't appear in DER bytes)."""
+    key, *anti = CERT_SUBJECT_MATCH.split(",")
+    with open(f"{TMP}/leaf_probe.cer", "wb") as f:
+        f.write(cert_der)
+    r = subprocess.run(["openssl", "x509", "-in", f"{TMP}/leaf_probe.cer",
+                        "-inform", "DER", "-noout", "-subject"],
+                       capture_output=True, text=True)
+    subject = (r.stdout or "")
+    return key in subject and all(a.lower() not in subject.lower() for a in anti)
 
 # DER prefix: SEQUENCE { SEQUENCE { OID 1.3.14.3.2.26 (sha1), NULL }, OCTET STRING } + 20-byte digest
 SHA1_DIGESTINFO_PREFIX = bytes([
@@ -59,10 +71,28 @@ os.makedirs(TMP, exist_ok=True)
 TOKEN_QUIET = False
 
 
+def detect_module() -> str:
+    """Pick the first installed middleware whose PKCS#11 module sees a token."""
+    import subprocess
+    for cand in PKCS11_MODULE_CANDIDATES:
+        if not cand or not os.path.exists(cand):
+            continue
+        r = subprocess.run([PKCS11_TOOL, "--module", cand, "--list-slots"],
+                           capture_output=True, text=True)
+        out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode == 0 and ("token present" in out or "token label" in out):
+            if not TOKEN_QUIET:
+                print(f"Middleware: {cand}")
+            return cand
+    sys.exit("No PKCS#11 middleware sees a token. Plug in the USB token; if it stays "
+             "unseen, install SafeNet Authentication Client for macOS or set NB_PKCS11_MODULE.")
+
+
 def get_leaf_cert() -> bytes:
     """Read the signer's leaf certificate off the token (no PIN needed)."""
     import pkcs11
-    lib = pkcs11.lib(PKCS11_MODULE)
+    module = detect_module()
+    lib = pkcs11.lib(module)
     slots = [s for s in lib.get_slots(token_present=True) if s.get_token()]
     if not slots:
         sys.exit("No token found. Is the USB reader + token plugged in?")
@@ -96,7 +126,7 @@ def sign_token(pin: str, message: bytes, mechanism: str = "SHA256-RSA-PKCS") -> 
     if os.path.exists(sig_path):
         os.remove(sig_path)
     r = subprocess.run(
-        [PKCS11_TOOL, "--module", PKCS11_MODULE, "--slot", "0",
+        [PKCS11_TOOL, "--module", detect_module(), "--slot", "0",
          "--login", "--pin", pin,
          "--sign", "--mechanism", mechanism,
          "--input", in_path, "--output", sig_path],

@@ -10,8 +10,6 @@ import Cocoa
 import WebKit
 import CryptoKit
 
-let PKCS11_TOOL = "/opt/homebrew/bin/pkcs11-tool"
-let PKCS11_MODULE = "/usr/local/lib/libeTPkcs11.dylib"
 let PORTAL_URL = URL(string: "https://www.netbanking.mk/Stopanstvo/Account/Login")!
 
 // DER prefix: SEQUENCE { SEQUENCE { OID 1.3.14.3.2.26 (sha1), NULL }, OCTET STRING }
@@ -22,22 +20,73 @@ let SHA1_DIGESTINFO_PREFIX: [UInt8] = [
 
 var cachedPin: String?
 var leafCertB64 = ""
+var pkcs11Module: String = ""
+var pkcs11ToolPath: String = ""
 
 func fail(_ msg: String) -> NSError {
     NSError(domain: "NetBanking", code: 1,
             userInfo: [NSLocalizedDescriptionKey: msg])
 }
 
-// MARK: - Token leaf certificate (via the proven CLI helper; no in-process FFI)
+// MARK: - Bundled tool discovery + middleware auto-detection
 
-let HELP_DIR = ("~/netbanking-helper" as NSString).expandingTildeInPath
-let PYTHON = HELP_DIR + "/venv/bin/python"
-let HELPER = HELP_DIR + "/netbank_login.py"
+// Candidate PKCS#11 middlewares, in the order the bank's tokens are typically issued.
+let MODULE_CANDIDATES = [
+    "/usr/local/lib/libeTPkcs11.dylib",        // SafeNet Authentication Client (eToken/IDPrime MD)
+    "/usr/local/lib/libIDPrimePKCS11.dylib",   // Gemalto IDPrime middleware
+    "/usr/local/lib/libClassicClientPKCS11.dylib", // Gemalto Classic Client
+    "/usr/local/lib/libgclib.dylib",
+]
+
+func bundledToolsDir() -> URL {
+    let exec = Bundle.main.executableURL!.deletingLastPathComponent()
+    return exec.appendingPathComponent("tools")
+}
+
+func resolveTools() throws {
+    // pkcs11-tool: prefer the bundled copy, fall back to Homebrew.
+    let bundled = bundledToolsDir().appendingPathComponent("pkcs11-tool")
+    pkcs11ToolPath = FileManager.default.fileExists(atPath: bundled.path)
+        ? bundled.path : "/opt/homebrew/bin/pkcs11-tool"
+    guard FileManager.default.fileExists(atPath: pkcs11ToolPath) else {
+        throw fail("pkcs11-tool not found (install with:  brew install opensc)")
+    }
+    // Module: env override, else probe candidates for one that sees a token.
+    if let env = ProcessInfo.processInfo.environment["NB_PKCS11_MODULE"] {
+        pkcs11Module = env
+        return
+    }
+    for cand in MODULE_CANDIDATES where FileManager.default.fileExists(atPath: cand) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: pkcs11ToolPath)
+        proc.arguments = ["--module", cand, "--list-slots"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        try? proc.run()
+        proc.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                         encoding: .utf8) ?? ""
+        if proc.terminationStatus == 0,
+           out.contains("token present") || out.contains("token label") {
+            pkcs11Module = cand
+            return
+        }
+    }
+    throw fail("No PKCS#11 middleware sees a token.\nPlug in the USB token; if it still "
+             + "isn't found, install the SafeNet Authentication Client (or your token's "
+             + "macOS driver) or set NB_PKCS11_MODULE.")
+}
+
+// MARK: - Token leaf certificate via the bundled nb-cert CLI
 
 func readLeafCertB64() throws -> String {
+    let exec = Bundle.main.executableURL!.deletingLastPathComponent()
+    let cert = exec.appendingPathComponent("nb-cert")
     let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: PYTHON)
-    proc.arguments = [HELPER, "--cert"]
+    proc.executableURL = FileManager.default.fileExists(atPath: cert.path)
+        ? cert : URL(fileURLWithPath: "/usr/local/bin/nb-cert")
+    proc.arguments = [pkcs11Module]
     let pipe = Pipe()
     proc.standardOutput = pipe
     proc.standardError = Pipe()
@@ -45,13 +94,11 @@ func readLeafCertB64() throws -> String {
     proc.waitUntilExit()
     let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
                      encoding: .utf8) ?? ""
-    // Be defensive: use only the long base64 line from the helper's output.
     let out = raw.split(separator: "\n")
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { $0.count > 100 && !$0.contains("Token:") }
         .last ?? ""
     guard proc.terminationStatus == 0, out.count > 100 else {
-        throw fail("Cannot read the USB token. Is it plugged in?\n(\(raw.prefix(200)))")
+        throw fail("Cannot read the USB token. Is it plugged in?\n(\(raw.prefix(300)))")
     }
     return out
 }
@@ -78,8 +125,8 @@ func tokenSign(_ message: Data, pin: String) throws -> Data {
     try? FileManager.default.removeItem(at: outFile)
 
     let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: PKCS11_TOOL)
-    proc.arguments = ["--module", PKCS11_MODULE, "--slot", "0",
+    proc.executableURL = URL(fileURLWithPath: pkcs11ToolPath)
+    proc.arguments = ["--module", pkcs11Module, "--slot", "0",
                       "--login", "--pin", pin,
                       "--sign", "--mechanism", "RSA-PKCS",
                       "--input", inFile.path, "--output", outFile.path]
@@ -269,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
+            try resolveTools()
             leafCertB64 = try readLeafCertB64()
         } catch {
             NSAlert(error: error).runModal()

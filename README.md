@@ -31,20 +31,32 @@ The gem: no Java, no Windows, no browser extension. The app injects the
 `TokenSigning` JS API the portal calls and implements it natively, so all
 signing screens (login, payment orders) route to the USB token.
 
-## Requirements
+## Requirements & installation for new users
 
-- macOS 13+
-- A USB smart-card reader with the bank's token (~Gemalto reader + IDPrime MD
-  or SafeNet eToken)
-- **SafeNet Authentication Client** middleware installed
-  (`/usr/local/lib/libeTPkcs11.dylib` etc.) — same drivers the bank asks for
-- [Homebrew](https://brew.sh) with `brew install opensc` (provides
-  `pkcs11-tool`, used for the token's always-authenticate signing path)
+1. **Plug the token** in (USB reader + token, or the all-in-one USB token key).
+2. **Install the token middleware** — the one piece this package cannot ship
+   (it's licensed middleware and must come through your bank/CA):
+   install **SafeNet Authentication Client for macOS** (covers SafeNet eToken
+   and Gemalto IDPrime MD cards; free, from Thales SafeNet support or from
+   your bank's/KIBS support portal — Sparkasse mk corporate customers can find
+   it via corporatenetbanking@sparkasse.mk). After macOS updates, re-check
+   that `/usr/local/lib/libeTPkcs11.dylib` still exists.
+3. **Install the app**: download `NetBanking-<version>.pkg` from this repo's
+   *Releases* page and double-click → installs to /Applications.
+   The package is self-contained (its own signer tool, certificate reader and
+   middleware auto-detection — SafeNet eToken, IDPrime, Gemalto Classic are
+   probed automatically; no Homebrew needed).
+4. Open **NetBanking**, accept the macOS security prompts, enter your token
+   PIN once (kept in RAM, never sent anywhere), then log in with **Најава**.
 
-## Build & install
+For developers / headless use, build from source:
+
+## Build & install (from source)
 
 ```bash
-# CLI helper (python stdlib + python-pkcs11)
+cd netbanking
+
+# CLI helper (python stdlib + python-pkcs11; needs brew install opensc)
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
 
 # Test that the token signs on macOS (prompts for PIN; completely offline)
