@@ -41,13 +41,20 @@ signing screens (login, payment orders) route to the USB token.
    your bank's/KIBS support portal — Sparkasse mk corporate customers can find
    it via corporatenetbanking@sparkasse.mk). After macOS updates, re-check
    that `/usr/local/lib/libeTPkcs11.dylib` still exists.
-3. **Install the app**: download `NetBanking-<version>.pkg` from this repo's
-   *Releases* page and double-click → installs to /Applications.
-   The package is self-contained (its own signer tool, certificate reader and
+3. **Install the app** — download from this repo's *Releases* page, either:
+   - `NetBanking-<v>.dmg` (recommended): open it, drag **NetBanking.app** onto the
+     Applications folder icon — done. No installer, no admin password.
+   - `NetBanking-<v>.pkg`: double-click and step through the installer (installs
+     to /Applications via the usual wizard).
+   The app is self-contained (its own signer tool, certificate reader and
    middleware auto-detection — SafeNet eToken, IDPrime, Gemalto Classic are
    probed automatically; no Homebrew needed).
-4. Open **NetBanking**, accept the macOS security prompts, enter your token
-   PIN once (kept in RAM, never sent anywhere), then log in with **Најава**.
+   *First launch only:* if macOS says it can't verify the app, right-click
+   **NetBanking** → **Open → Open** (or System Settings → Privacy & Security →
+   "Open Anyway"). This is expected for un-notarized apps; accept once and it
+   opens normally afterwards.
+4. Open **NetBanking**, enter your token PIN once (kept in RAM, never sent
+   anywhere), then log in with **Најава**.
 
 For developers / headless use, build from source:
 
