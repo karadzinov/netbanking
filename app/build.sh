@@ -51,4 +51,4 @@ pkgbuild --root "$STAGE" \
          --no-relocate \
          dist/NetBanking-1.0.pkg 2>&1 | tail -2
 echo "Built $(pwd)/$APP and $(pwd)/dist/NetBanking-1.0.pkg"
-echo "Note: the app depends on /Users/martin/netbanking-helper (python venv, pkcs11-tool)."
+echo "Note: the app expects the CLI helper repo at ~/netbanking-helper (venv + netbank_login.py)."

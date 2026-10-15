@@ -35,7 +35,7 @@ PKCS11_MODULE = "/usr/local/lib/libeTPkcs11.dylib"
 PKCS11_TOOL = "pkcs11-tool"
 # The signer's leaf certificate is identified by having a personal serialNumber=
 # attribute and no CA/qualified-issuer markers. Override via NB_CERT_SUBJECT
-# (comma-separated, UTF-8) if your CA issues differently, e.g. "MARTIN,KIBSTrust".
+# (comma-separated, UTF-8) if your CA issues differently, e.g. "SURNAME,ISSUER-CA".
 CERT_SUBJECT_MATCH = os.environ.get(
     "NB_CERT_SUBJECT", "serialNumber=,NTRMK-").encode()
 

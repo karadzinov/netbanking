@@ -30,8 +30,9 @@ func fail(_ msg: String) -> NSError {
 
 // MARK: - Token leaf certificate (via the proven CLI helper; no in-process FFI)
 
-let PYTHON = "/Users/martin/netbanking-helper/venv/bin/python"
-let HELPER = "/Users/martin/netbanking-helper/netbank_login.py"
+let HELP_DIR = ("~/netbanking-helper" as NSString).expandingTildeInPath
+let PYTHON = HELP_DIR + "/venv/bin/python"
+let HELPER = HELP_DIR + "/netbank_login.py"
 
 func readLeafCertB64() throws -> String {
     let proc = Process()
