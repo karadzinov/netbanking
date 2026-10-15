@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.app/
+*.pkg
+dist/
+*.icns
+iconset/
+AppIcon.iconset/
+*.o
+*.tmp
+.DS_Store
+nohup.out
+app.log
+NetBanking/
